@@ -35,14 +35,8 @@ class SessionValidationSubscriber implements EventSubscriberInterface
 
         $request = $event->getRequest();
         $route = $request->attributes->get('_route');
-        
-        // Gère le flash message sur la page de login
-        if ($route === 'app_login') {
-            $this->handleLoginPageFlash($request);
-            return;
-        }
 
-        // Ignore les autres routes exclues
+        // Ignore les routes exclues
         if (in_array($route, self::EXCLUDED_ROUTES, true)) {
             return;
         }
@@ -64,29 +58,6 @@ class SessionValidationSubscriber implements EventSubscriberInterface
 
         // Gère la session invalide
         $this->handleInvalidSession($event, $session, $user);
-    }
-
-    /**
-     * Ajoute le flash message sur la page de login si marqueur présent
-     */
-    private function handleLoginPageFlash(Request $request): void
-    {
-        $session = $request->getSession();
-        
-        // Vérifie si un marqueur de session invalide est présent
-        if ($session->has('_logout_reason') && $session->get('_logout_reason') === 'invalid_session') {
-            $session->getFlashBag()->add(
-                'error',
-                'Votre session est invalide. Vous avez été déconnecté. Veuillez vous reconnecter.'
-            );
-            
-            // Supprime le marqueur après usage
-            $session->remove('_logout_reason');
-            
-            $this->logger->info('Flash message added on login page', [
-                'reason' => 'invalid_session',
-            ]);
-        }
     }
 
     /**
@@ -127,9 +98,11 @@ class SessionValidationSubscriber implements EventSubscriberInterface
             'missing_keys' => $missingKeys,
         ]);
 
-        // Marque la raison du logout dans la session
-        // Ce marqueur survivra à l'invalidation et sera lu sur la page login
-        $session->set('_logout_reason', 'invalid_session');
+        // Ajoute le flash MAINTENANT avant la redirection vers logout
+        $session->getFlashBag()->add(
+            'error',
+            'Votre session est invalide. Vous avez été déconnecté. Veuillez vous reconnecter.'
+        );
 
         // Redirige vers logout
         $response = new RedirectResponse(
