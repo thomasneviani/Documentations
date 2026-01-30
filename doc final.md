@@ -210,3 +210,175 @@ Si tu veux, je peux te donner :
 * ou un **script pour scanner toutes les notices legacy**
 
 Dis-moi ce que tu veux attaquer en premier 🔧
+
+
+Parfait 👍 c’est **exactement la bonne stratégie** :
+👉 **Symfony strict partout**,
+👉 **Legacy tolérant uniquement dans `LegacyController`**.
+
+On va faire ça **proprement et isolé**, sans polluer le reste de l’app.
+
+---
+
+# 🎯 Objectif
+
+* Controllers Symfony → `E_ALL`, exceptions, debug normal
+* `LegacyController` → **même comportement PHP qu’avant Symfony**
+* Pas d’impact global
+* Réversible / maîtrisé
+
+---
+
+## 1️⃣ Le point clé à comprendre
+
+Symfony installe :
+
+* `ErrorHandler`
+* `ExceptionHandler`
+* `error_reporting(E_ALL)`
+
+👉 Il faut **désactiver TEMPORAIREMENT tout ça**,
+👉 **juste le temps d’exécuter le legacy**,
+👉 puis **restaurer l’état initial**.
+
+---
+
+## 2️⃣ Implémentation PRO dans `LegacyController`
+
+### ✅ Version recommandée (safe & propre)
+
+```php
+// src/Controller/LegacyController.php
+namespace App\Controller;
+
+use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\ErrorHandler\ErrorHandler;
+
+class LegacyController
+{
+    public function handle(Request $request): Response
+    {
+        /**
+         * Sauvegarde de l'état PHP actuel
+         */
+        $previousErrorReporting = error_reporting();
+        $previousDisplayErrors  = ini_get('display_errors');
+        $previousLogErrors      = ini_get('log_errors');
+        $previousHandler        = set_error_handler(fn() => false);
+
+        /**
+         * Configuration legacy
+         */
+        restore_error_handler(); // enlève le handler Symfony
+        ErrorHandler::register(null, false);
+
+        error_reporting(0);
+        ini_set('display_errors', '0');
+        ini_set('log_errors', '0');
+
+        /**
+         * Environnement legacy
+         */
+        $_GET     = $request->query->all();
+        $_POST    = $request->request->all();
+        $_COOKIE  = $request->cookies->all();
+        $_REQUEST = array_merge($_GET, $_POST);
+
+        ob_start();
+
+        try {
+            require __DIR__ . '/../../legacy/legacy.php';
+        } finally {
+            $content = ob_get_clean();
+
+            /**
+             * Restauration Symfony
+             */
+            error_reporting($previousErrorReporting);
+            ini_set('display_errors', $previousDisplayErrors);
+            ini_set('log_errors', $previousLogErrors);
+            restore_error_handler();
+        }
+
+        return new Response($content);
+    }
+}
+```
+
+---
+
+## 3️⃣ Ce que ça garantit
+
+✅ Symfony reste **strict partout ailleurs**
+✅ Legacy retrouve :
+
+* erreurs silencieuses
+* `undefined index` ignorés
+* vieux patterns PHP
+  ✅ Aucun effet de bord
+  ✅ Compatible prod / dev
+
+---
+
+## 4️⃣ Variante plus fine (recommandée à moyen terme)
+
+Si tu veux :
+
+* ignorer notices & warnings
+* garder fatales visibles
+
+```php
+error_reporting(E_ERROR | E_PARSE);
+```
+
+À mettre **à la place de `error_reporting(0)`**.
+
+---
+
+## 5️⃣ BONUS : logger les erreurs legacy sans les afficher
+
+Très utile pour nettoyer plus tard 👇
+
+```php
+ini_set('log_errors', '1');
+ini_set('error_log', dirname(__DIR__, 2) . '/var/log/legacy.log');
+```
+
+Résultat :
+
+* utilisateur = aucun bruit
+* dev = visibilité totale
+
+---
+
+## 6️⃣ Architecture recommandée (si tu veux être clean)
+
+```
+src/
+ ├─ Controller/
+ │   ├─ LegacyController.php   ← tolérant
+ │   └─ ProductController.php  ← strict
+legacy/
+ ├─ legacy.php
+ ├─ product.php
+ └─ contact.php
+```
+
+---
+
+## 7️⃣ Règle d’or (tu fais exactement ce qu’il faut)
+
+> **Le legacy ne doit jamais dicter la config globale.**
+> Il s’adapte, il ne contamine pas.
+
+---
+
+Si tu veux, je peux te montrer :
+
+* un **EventSubscriber** pour isoler encore plus
+* un **kernel legacy dédié**
+* ou une **migration progressive legacy → Symfony sans downtime**
+
+Dis-moi 👉 on continue où 🔥
+
